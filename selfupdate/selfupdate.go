@@ -122,7 +122,7 @@ func CompareVersions(a, b string) (int, bool) {
 	if !aok || !bok {
 		return 0, false
 	}
-	for i := range 3 {
+	for i := range len(av) {
 		if av[i] != bv[i] {
 			if av[i] < bv[i] {
 				return -1, true
@@ -133,26 +133,48 @@ func CompareVersions(a, b string) (int, bool) {
 	return 0, true
 }
 
-// parseVersion 解析 "v0.3.7" / "0.3.7" 形式的版本号为 [3]int。
-//
-// 只接受纯净的三段式：build.sh 在非 tag 构建时用 git describe 产出
-// "0.3.7-2-gabc1234" 这类带后缀的版本，它们必须被判为不可比较，而不是被当成
-// 0.3.7 —— 否则开发构建会被误判为"已是最新"或被正式版覆盖。
-func parseVersion(s string) ([3]int, bool) {
+// parseVersion 接受三段数字版本及本发行线已使用的 -ko.N、-global.N 标签。
+// 同一基础版本按原版、韩文版、全球版排序，再比较发行修订号。
+// 未知后缀、git describe 和 dirty 构建仍不可比较，避免覆盖开发版本。
+func parseVersion(s string) ([5]int, bool) {
 	s = strings.TrimSpace(s)
 	s = strings.TrimPrefix(s, "v")
 	if s == "" {
-		return [3]int{}, false
+		return [5]int{}, false
+	}
+	var out [5]int
+	if base, suffix, found := strings.Cut(s, "-"); found {
+		edition, revision, ok := strings.Cut(suffix, ".")
+		if !ok || revision == "" {
+			return [5]int{}, false
+		}
+		switch edition {
+		case "ko":
+			out[3] = 1
+		case "global":
+			out[3] = 2
+		default:
+			return [5]int{}, false
+		}
+		for _, c := range revision {
+			if c < '0' || c > '9' {
+				return [5]int{}, false
+			}
+		}
+		n, err := strconv.Atoi(revision)
+		if err != nil || n < 1 {
+			return [5]int{}, false
+		}
+		out[4], s = n, base
 	}
 	parts := strings.Split(s, ".")
 	if len(parts) != 3 {
-		return [3]int{}, false
+		return [5]int{}, false
 	}
-	var out [3]int
 	for i, p := range parts {
 		n, err := strconv.Atoi(p)
 		if err != nil || n < 0 {
-			return [3]int{}, false
+			return [5]int{}, false
 		}
 		out[i] = n
 	}
